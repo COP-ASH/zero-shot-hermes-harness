@@ -5,6 +5,8 @@ is checked by ``bool`` only — the value is never echoed, logged, or committed.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -13,7 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "gemini": "gemini-2.5-flash",
-    "openrouter": "tencent/hy3",  # cheap default ($0.14/M in) — frontier models 402 on unfunded keys; override via AGENT_LLM_MODEL
+    "openrouter": "anthropic/claude-sonnet-4-6",
 }
 
 
@@ -37,6 +39,13 @@ class Settings(BaseSettings):
     openrouter_base_url: str = Field(default="https://openrouter.ai/api/v1")
 
     log_level: str = Field(default="INFO")
+
+    # Upload directory for CSV files (created on first use)
+    upload_dir: str = Field(default="./data/uploads")
+
+    # Phase 2 — MSSQL integration (optional, unused in Phase 1)
+    mssql_dsn: str = Field(default="")
+    cache_ttl_seconds: int = Field(default=300)
 
     # ----- derived -----
     def resolve_provider(self) -> str:
@@ -63,6 +72,11 @@ class Settings(BaseSettings):
             "gemini": self.gemini_api_key,
             "openrouter": self.openrouter_api_key,
         }.get(provider, "")
+
+    def get_upload_dir(self) -> Path:
+        p = Path(self.upload_dir)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
 
 
 _settings: Settings | None = None

@@ -1,48 +1,174 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Zero-Shot Agent — Transform</title>
+  <title>UP Police — Data Analyst Agent</title>
+  <meta name="description" content="AI-powered data analyst for UP Police. Upload CSVs and ask natural-language questions to get instant charts, tables, and insights." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main class="shell">
+  <!-- Sidebar -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-badge">🚔</div>
+        <div>
+          <div class="logo-title">UP Police</div>
+          <div class="logo-sub">Data Analyst Agent</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Source Tabs -->
+    <div class="source-tabs">
+      <button class="source-tab active" id="tab-csv" onclick="switchSource('csv')">
+        <span>📂</span> CSV Upload
+      </button>
+      <button class="source-tab disabled" id="tab-mssql" title="Coming in Phase 2">
+        <span>🗄️</span> MSSQL DB
+        <span class="stub-badge">Phase 2</span>
+      </button>
+    </div>
+
+    <!-- Upload Zone -->
+    <div class="upload-section" id="upload-section">
+      <div class="upload-zone" id="upload-zone"
+           ondragover="event.preventDefault(); this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="handleDrop(event)">
+        <div class="upload-icon">📁</div>
+        <div class="upload-text">Drag &amp; drop CSVs here</div>
+        <div class="upload-hint">or click to browse</div>
+        <input type="file" id="file-input" multiple accept=".csv" style="display:none" onchange="handleFileSelect(event)" />
+        <button class="upload-btn" onclick="document.getElementById('file-input').click()">Choose Files</button>
+      </div>
+    </div>
+
+    <!-- Uploaded Files List -->
+    <div class="files-section" id="files-section" style="display:none">
+      <div class="section-label">Uploaded Files</div>
+      <ul class="files-list" id="files-list"></ul>
+      <button class="btn-ghost" onclick="addMoreFiles()">+ Add more files</button>
+    </div>
+
+    <!-- Schema Panel -->
+    <div class="schema-section" id="schema-section" style="display:none">
+      <div class="section-label">Schema</div>
+      <div class="schema-list" id="schema-list"></div>
+    </div>
+
+    <!-- Session Info -->
+    <div class="session-info" id="session-info" style="display:none">
+      <div class="session-id-label">Session</div>
+      <div class="session-id-val" id="session-id-display"></div>
+    </div>
+  </aside>
+
+  <!-- Main Content -->
+  <main class="main" id="main">
+    <!-- Top Bar -->
     <header class="topbar">
-      <h1>Zero-Shot Agent</h1>
-      <span id="provider-badge" class="badge" title="Active LLM provider">…</span>
+      <div class="topbar-left">
+        <span class="topbar-title" id="topbar-title">Upload data to begin analysis</span>
+      </div>
+      <div class="topbar-right">
+        <div class="provider-badge" id="provider-badge">
+          <span class="pulse-dot"></span>
+          <span id="provider-label">Connecting…</span>
+        </div>
+        <button class="btn-ghost" id="new-session-btn" onclick="newSession()">New Session</button>
+      </div>
     </header>
 
-    <!-- CAPABILITY SLOT — replace this form with your agent's UI -->
-    <section class="card" id="transform-card">
-      <h2>Transform text</h2>
-      <p class="hint">The baseline capability: give it text and an instruction; it applies the
-        instruction with one real LLM call.</p>
-
-      <label for="instruction">Instruction</label>
-      <input id="instruction" type="text"
-             value="Summarize the text in one short paragraph." />
-
-      <label for="text">Text</label>
-      <textarea id="text" rows="8"
-                placeholder="Paste the text to transform…"></textarea>
-
-      <button id="run-btn">Run</button>
-
-      <div id="status" class="status" hidden></div>
-      <div id="error" class="error" hidden></div>
-
-      <div id="result-wrap" hidden>
-        <h3>Result</h3>
-        <pre id="result"></pre>
-        <p class="meta" id="result-meta"></p>
+    <!-- Welcome Screen (shown before any files uploaded) -->
+    <div class="welcome-screen" id="welcome-screen">
+      <div class="welcome-hero">
+        <div class="welcome-icon">🔍</div>
+        <h1 class="welcome-title">UP Police Data Analyst</h1>
+        <p class="welcome-subtitle">Upload your CSV files — FIR records, crime statistics, officer logs — and ask any question in plain English.</p>
+        <div class="welcome-examples">
+          <div class="example-chip" onclick="setExample(this.textContent)">How many FIRs were filed per district in Q1?</div>
+          <div class="example-chip" onclick="setExample(this.textContent)">Show the top 5 crime categories by count</div>
+          <div class="example-chip" onclick="setExample(this.textContent)">Which districts had the highest IPC 302 cases?</div>
+          <div class="example-chip" onclick="setExample(this.textContent)">Compare month-over-month crime trends</div>
+        </div>
       </div>
-    </section>
+    </div>
 
-    <footer class="foot">
-      <span>API docs at <a href="/docs">/docs</a> · health at <a href="/health">/health</a></span>
-    </footer>
+    <!-- Chat Container -->
+    <div class="chat-container" id="chat-container" style="display:none">
+      <div class="messages" id="messages"></div>
+    </div>
+
+    <!-- Input Bar -->
+    <div class="input-bar" id="input-bar">
+      <div class="input-wrapper">
+        <textarea
+          id="question-input"
+          class="question-input"
+          placeholder="Ask a question about your data…"
+          rows="1"
+          disabled
+          onkeydown="handleKeydown(event)"
+          oninput="autoResize(this)"
+        ></textarea>
+        <button class="send-btn" id="send-btn" onclick="sendQuestion()" disabled>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+      <div class="input-hint" id="input-hint">Upload a CSV to start asking questions</div>
+    </div>
   </main>
+
+  <!-- Step Progress Overlay (shown while agent is working) -->
+  <div class="step-overlay" id="step-overlay" style="display:none">
+    <div class="step-card">
+      <div class="step-header">Agent is thinking…</div>
+      <div class="steps" id="steps">
+        <div class="step" id="step-plan">
+          <div class="step-icon">📋</div>
+          <div class="step-info">
+            <div class="step-name">Planning Query</div>
+            <div class="step-desc">Writing DuckDB SQL…</div>
+          </div>
+          <div class="step-status" id="step-plan-status">waiting</div>
+        </div>
+        <div class="step" id="step-execute">
+          <div class="step-icon">⚡</div>
+          <div class="step-info">
+            <div class="step-name">Executing Query</div>
+            <div class="step-desc">Running against your data…</div>
+          </div>
+          <div class="step-status" id="step-execute-status">waiting</div>
+        </div>
+        <div class="step" id="step-reflect">
+          <div class="step-icon">🔍</div>
+          <div class="step-info">
+            <div class="step-name">Reflecting</div>
+            <div class="step-desc">Validating result quality…</div>
+          </div>
+          <div class="step-status" id="step-reflect-status">waiting</div>
+        </div>
+        <div class="step" id="step-synthesize">
+          <div class="step-icon">✨</div>
+          <div class="step-info">
+            <div class="step-name">Synthesizing Answer</div>
+            <div class="step-desc">Writing answer &amp; chart…</div>
+          </div>
+          <div class="step-status" id="step-synthesize-status">waiting</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

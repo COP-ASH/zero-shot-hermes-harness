@@ -1,198 +1,99 @@
-# Zero-Shot SDD Harness for Building Agents — Hermes Native
+# UP Police Data Analyst Agent
 
-Give it a one-line idea. Walk away with a working, tested, phased agent.
+> All commands run from the **repo root** (`c:\Users\Ashwani Gupta\agent\zero-shot-hermes-harness`).
 
-A lean, **Hermes-native** harness for building agentic software **spec-first**. One person
-with an idea and one API key can drive a real, production-shaped agent into existence — and
-a senior engineer opening the result finds a conventional, reviewable stack, not generated
-mush.
+An AI-powered data analyst for UP (Uttar Pradesh) Police. Upload CSV files (FIR records, crime statistics, officer logs) and ask natural-language questions — get interactive charts, data tables, plain-English answers, and the SQL/Python code used to produce them.
 
----
+## Quick Start
 
-## The Spirit
-
-Six convictions the whole repo is built around:
-
-1. **Spec is the source of truth.** Written before the code, always. When spec and code disagree, the spec wins and the code is fixed (`/zero-shot-sync`).
-2. **Built for two audiences at once.** A non-coder drives it with a single sentence; a senior engineer inherits a clean FastAPI + LangGraph stack they can read, review, and own.
-3. **Lean harness, not a framework.** `harness/` is engineering *mindfulness* — rules and patterns that keep every session consistent. The product runtime stays provider-agnostic.
-4. **Smallest first-time-right win, phase by phase.** Each phase ships the smallest increment a human can actually test, and it must work the *first* time they test it.
-5. **A human gates every phase.** Autonomous *within* a phase; stops at each boundary for you to test the increment.
-6. **Real LLM/API or it doesn't count.** Gates and tests run against the real model with keys from `.env`. A stubbed pass is not a pass.
-
----
-
-## What This Is
-
-- A working **baseline agent** in `src/` — FastAPI + LangGraph + SQLite, provider-agnostic
-  LLM (**Anthropic, Gemini, or OpenRouter** — pure httpx, no SDKs), `transform_text` as the
-  capability slot, structured logging, graceful error paths. **Tests pass out of the box.**
-- A **zero-build static frontend** in `frontend/public/` served by the backend at `/app` —
-  no npm, no bundler, nothing to break at clone time.
-- A **spec template** in `spec/` — roadmap, architecture, capabilities, data, api, ui, and
-  the agent graph.
-- Three **skills**: `/zero-shot-build`, `/zero-shot-fix`, `/zero-shot-sync`.
-- Three **dual-mode specialist roles** (`harness/agents/`): spec-writer, code-generator,
-  qa-auditor — delegated when the runtime allows, executed inline by the root session
-  otherwise.
-- **A human testing gate between phases** — you click a live URL; you never run a terminal
-  command to test.
-
-## The Hermes-Native Architecture
-
-The original Claude-Code harness delegated the whole build to an orchestrator sub-agent
-that fanned out workers. Hermes caps delegation depth (`max_spawn_depth=1`), so that design
-silently degrades. This port makes the constraint the architecture:
+### 1. Set up environment
 
 ```
-YOU (idea, .env key, clicking the app)
- │
-ROOT SESSION — the orchestrator. Owns: human channel (clarify), git/PR, server lifecycle.
- │
- ├─ spec-writer      ─ full spec + phased plan, self-reviewed        (delegate or inline)
- ├─ code-generator   ─ one slice + tests, per slice                  (parallel or inline)
- └─ qa-auditor       ─ read-only review + runs the REAL gates        (delegate or inline)
- │
-per phase:  implement → run real gate → READ output → fix → re-run
-            → boot on the documented command → live smoke → commit+push
-            → HUMAN GATE: one live URL + multi-select checklist
+# repo root
+copy .env.example .env
+# Edit .env — set AGENT_OPENROUTER_API_KEY=sk-or-v1-...
 ```
 
-Three properties make it robust on Hermes:
-
-- **Inline fallback everywhere.** Delegation is an optimization, never a dependency — the
-  root executes any role file as a checklist when workers can't spawn.
-- **Trust-but-verify handbacks.** Workers routinely return at "95% done"; the root checks
-  the files, re-runs the gate, and finishes remainders itself.
-- **The gate owns the run.** Only the root launches servers (workers' processes die on
-  return), with the pinned interpreter on a verified free port — you get ONE live URL that
-  has already been smoke-tested.
-
----
-
-## How to Use This
-
-```bash
-git clone <this repo> my-agent && cd my-agent
-cp .env.example .env        # set exactly ONE provider key (Anthropic / Gemini / OpenRouter)
-```
-
-Then open a Hermes session anchored to the repo and **just say what you want, in plain
-English** — no slash command, no setup:
+### 2. Install dependencies
 
 ```
-Build me an agent that monitors my Shopify store for low-inventory products and drafts restock emails.
-```
-
-Hermes auto-loads `.hermes.md` from the repo, which **routes your request to exactly one of
-three skills** and follows it:
-
-- **build** — "build me an agent that…", "add X to it" → creates the agent / adds a capability
-- **fix** — "it's erroring on…", "the tests fail", "X doesn't work" → diagnoses + fixes, then verifies
-- **sync** — "make the code match the spec", "reconcile the drift" → reconciles spec ↔ code (spec wins)
-
-You never pick the skill — describe the goal and the harness chooses. One deep intake (which
-also collects your API key into `.env`), then the build runs one phase at a time and stops at
-each boundary with a live URL for you to test.
-
-**Prefer the `/zero-shot-build` slash command?** Hermes only recognises slash commands that
-are registered — an unregistered one returns "Unknown command". Register this clone once
-(one line, tracks the repo, nothing to re-run after `git pull`), then restart Hermes:
-
-```yaml
-# ~/.hermes/config.yaml
-skills:
-  external_dirs:
-    - /absolute/path/to/this/clone/harness/skills
-```
-
-*Optional:* `uv sync && uv run python agent.py` runs a doctor over the baseline (deps, `.env`,
-app, unit tests). Not required to build.
-
-## What Happens
-
-```
-Your idea
-    ↓
-INTAKE — multi-round product questions (idea-specific, multi-select), then one technical
-         round; fill .env; the key is VALIDATED with a real call before building
-    ↓
-[spec-writer]  → full spec: capabilities + architecture + agent graph + phased plan
-    ↓
-[root session] → feature branch + PR (base = the branch you were on, never main)
-    ↓
-per phase:  code-generator per slice → qa-auditor gates each → boot + live smoke
-            → commit + push → HUMAN GATE (live URL + what-worked checklist)
-    ↓
-repeat per phase → final drift audit → SHIP
-```
-
----
-
-## Running the Baseline
-
-```bash
-# all commands run from the repo root
+# repo root
 uv sync
-cp .env.example .env         # set ONE of: AGENT_ANTHROPIC_API_KEY / AGENT_GEMINI_API_KEY / AGENT_OPENROUTER_API_KEY
-uv run python agent.py       # verify setup (doctor)
-uv run python agent.py --run # migrations (if any) + start the server
 ```
 
-| URL | What |
-|-----|------|
-| `http://localhost:8001/app/` | **UI** — the transform form (the capability slot) |
-| `http://localhost:8001/health` | Health + active provider (never key values) |
-| `http://localhost:8001/docs` | Interactive API docs (Swagger) |
-
-Tests:
-
-```bash
-uv run pytest tests/unit -q          # no key needed — green on a fresh clone
-uv run pytest tests -q               # + integration against the REAL provider (key in .env)
-```
-
-## Repo Layout
+### 3. Run the app
 
 ```
-src/                ← baseline agent: api/ config/ db/ domain/ graph/ llm/ prompts/ observability/
-frontend/public/    ← zero-build static UI (index.html + styles.css + app.js), served at /app
-tests/              ← unit/ (no key) + integration/ (real key)
-spec/               ← your spec: roadmap, architecture, capabilities/, data, api, ui, agent
-harness/
-  rules/            ← ai-agents, git, secret-hygiene
-  patterns/         ← spec-driven, phases, project-layout, tech-stack, code, test-driven,
-                      ui-ux, agentic-ai, engineering-practices
-  skills/           ← zero-shot-build / zero-shot-fix / zero-shot-sync (SKILL.md each)
-  agents/           ← spec-writer, code-generator, qa-auditor (dual-mode role files)
-AGENTS.md           ← the session entry point
-agent.py            ← doctor (default) / --run (serve)
-alembic/            ← migrations, wired (empty until the first schema change)
-.env.example
+# repo root
+uv run python -m src
 ```
 
-**Capability slot** — the three surfaces to replace for your agent:
-- `src/graph/nodes.py` — replace `transform_text` with your logic
-- `src/prompts/transform.md` — replace with your system prompt
-- `frontend/public/` — replace the transform form with your UI
+Open **http://localhost:8001/app/** in your browser.
 
-Everything else (graph wiring, API, DB, settings, providers, tests) is already working.
+### 4. Use the agent
 
----
+1. Drag and drop a CSV file (FIR records, crime data, etc.) onto the upload area
+2. See the schema panel populate automatically (column names, types, row count)
+3. Type a question: *"Which district had the most IPC 302 cases?"*
+4. Watch the step indicators: Planning → Executing → Reflecting → Done
+5. Get a bar chart + plain-English answer + the DuckDB SQL used
+6. Click **Download CSV** to get the result data
+7. Click follow-up suggestions to dig deeper
 
-## FAQ
+## Environment Variables
 
-**What if I already have a stack in mind?**
-State it in the idea: `/zero-shot-build [idea] — use Python + FastAPI + PostgreSQL`. Stack
-choices are binding.
+| Variable | Purpose | Default |
+|---|---|---|
+| `AGENT_OPENROUTER_API_KEY` | OpenRouter API key (**required**) | — |
+| `AGENT_LLM_MODEL` | LLM model slug | `anthropic/claude-sonnet-4-6` |
+| `AGENT_DATABASE_URL` | SQLite path for session store | `sqlite:///./data/app.db` |
+| `AGENT_UPLOAD_DIR` | Directory for uploaded CSVs | `./data/uploads` |
+| `PORT` | HTTP port | `8001` |
+| `AGENT_LOG_LEVEL` | Logging level | `INFO` |
 
-**What if something breaks?**
-`/zero-shot-fix [what's broken]` — qa-auditor classifies SPEC vs CODE, the generator role
-fixes, qa-auditor re-gates, the root commits + pushes.
+## Running Tests
 
-**What if spec and code drift?**
-`/zero-shot-sync` — qa-auditor audits, generators fix, spec wins.
+```
+# repo root
+uv run pytest tests/phase1/ -v
+```
 
-**Why did my build branch not merge to main?**
-By design. `main` is boilerplate-only — ABSOLUTELY. Builds live on feature branches whose
-PRs target the branch they were cut from.
+- **Unit tests** (no LLM key needed): DuckDB tool, session/upload API, health check
+- **Integration tests** (real LLM key from `.env`): full journey, aggregation, download, multi-turn chat, frontend serving
+
+## Architecture
+
+```
+Browser → FastAPI → LangGraph analysis graph → DuckDB (in-process)
+                                              → OpenRouter LLM
+                                              → SQLite (session store)
+```
+
+**Analysis graph nodes:**
+1. `plan_query` — LLM writes DuckDB SQL from schema + question
+2. `execute_query` — DuckDB runs the SQL (read-only, validated)
+3. `reflect` — LLM checks if result is valid; retries up to 2x with corrected SQL
+4. `synthesize` — LLM writes answer + Plotly chart spec + 3 follow-up questions
+
+**Privacy:** Only the question text + table schema (column names + types) are sent to the LLM. **Raw row data never leaves the server.**
+
+## What's in Phase 2
+
+- 🗄️ **MSSQL connector** — read-only, protected by a DuckDB caching layer (TTL-based)
+- 📄 **PDF report generator** — export session as a formatted report
+- 🔄 **Materialized views** — pre-computed views for frequent MSSQL queries
+
+## File Layout
+
+```
+src/
+  api/          — FastAPI routes (sessions, upload, query, health)
+  config/       — Settings (env prefix AGENT_)
+  db/           — SQLAlchemy models (sessions, query_runs)
+  graph/        — LangGraph nodes, edges, state, agent, runner
+  llm/          — LLM client + OpenRouter provider
+  tools/        — DuckDB tool (register CSV views, execute SQL)
+  prompts/      — Analyst prompts (plan, synthesize, reflect)
+frontend/public/ — Zero-build static UI (HTML/CSS/JS + Plotly)
+tests/phase1/   — Unit + integration tests
+```

@@ -22,12 +22,19 @@ async def _lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Zero-Shot Agent", version="0.1.0", lifespan=_lifespan)
+    app = FastAPI(
+        title="UP Police Data Analyst Agent",
+        version="1.0.0",
+        description="AI-powered data analyst for UP Police — upload CSVs and ask questions.",
+        lifespan=_lifespan,
+    )
 
-    from src.api import health, runs
+    from src.api import health, sessions, upload, query
 
     app.include_router(health.router)
-    app.include_router(runs.router)
+    app.include_router(sessions.router)
+    app.include_router(upload.router)
+    app.include_router(query.router)
 
     if _FRONTEND_DIR.is_dir():
         app.mount("/app", StaticFiles(directory=_FRONTEND_DIR, html=True), name="frontend")
