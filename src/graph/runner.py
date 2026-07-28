@@ -19,6 +19,7 @@ def run_analysis(
     question: str,
     schema: dict,
     chat_history: list[dict],
+    session_type: str = "csv",
 ) -> str:
     """Run the analysis graph and return the query_run_id."""
     log = get_logger("runner")
@@ -41,6 +42,7 @@ def run_analysis(
         "chat_history": chat_history,
         "retry_count": 0,
         "error": None,
+        "session_type": session_type,
     }
 
     with log_span(log, "analysis_run", run_id=run_id, session_id=session_id) as span:

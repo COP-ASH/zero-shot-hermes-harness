@@ -29,9 +29,8 @@
       <button class="source-tab active" id="tab-csv" onclick="switchSource('csv')">
         <span>📂</span> CSV Upload
       </button>
-      <button class="source-tab disabled" id="tab-mssql" title="Coming in Phase 2">
+      <button class="source-tab" id="tab-mssql" onclick="switchSource('mssql')">
         <span>🗄️</span> MSSQL DB
-        <span class="stub-badge">Phase 2</span>
       </button>
     </div>
 
@@ -46,6 +45,16 @@
         <div class="upload-hint">or click to browse</div>
         <input type="file" id="file-input" multiple accept=".csv" style="display:none" onchange="handleFileSelect(event)" />
         <button class="upload-btn" onclick="document.getElementById('file-input').click()">Choose Files</button>
+      </div>
+    </div>
+
+    <!-- MSSQL Zone -->
+    <div class="upload-section" id="mssql-section" style="display:none">
+      <div class="upload-zone" style="cursor:default">
+        <div class="upload-icon">🗄️</div>
+        <div class="upload-text">Live Police Database</div>
+        <div class="upload-hint">Read-only connection via AGENT_MSSQL_DSN</div>
+        <button class="upload-btn" id="mssql-connect-btn" onclick="connectMSSQL()">Connect</button>
       </div>
     </div>
 

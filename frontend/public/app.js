@@ -6,6 +6,7 @@
 
 // ── State ──────────────────────────────────────────────────────────
 let sessionId = null;
+let sessionType = "csv"; // "csv" or "mssql"
 let isQuerying = false;
 let lastRunId = null;
 let uploadedFiles = []; // [{name, view_name, columns, row_count}]
@@ -72,9 +73,48 @@ function addMoreFiles() {
 }
 
 function switchSource(source) {
+  document.querySelectorAll('.source-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById(`tab-${source}`).classList.add('active');
+  
   if (source === "mssql") {
-    showStubToast("MSSQL integration is coming in Phase 2!");
-    return;
+    document.getElementById("upload-section").style.display = "none";
+    document.getElementById("mssql-section").style.display = "block";
+    sessionType = "mssql";
+  } else {
+    document.getElementById("upload-section").style.display = "block";
+    document.getElementById("mssql-section").style.display = "none";
+    sessionType = "csv";
+  }
+}
+
+async function connectMSSQL() {
+  const btn = document.getElementById("mssql-connect-btn");
+  btn.textContent = "Connecting...";
+  btn.disabled = true;
+
+  try {
+    const r = await fetch(`/api/mssql/connect`, { method: "POST" });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || data.error || "Connection failed");
+    
+    sessionId = data.data?.session_id || data.session_id;
+    const allFiles = data.data?.files || data.files || [];
+    uploadedFiles = allFiles;
+    sessionType = "mssql";
+
+    const el = document.getElementById("session-id-display");
+    if (el) el.textContent = sessionId?.slice(0, 12) + "…";
+    document.getElementById("session-info").style.display = "block";
+
+    renderSchema(allFiles);
+    enableChat();
+    
+    btn.textContent = "Connected";
+    btn.style.background = "var(--success)";
+  } catch (err) {
+    showError(`MSSQL Connection failed: ${err.message}`);
+    btn.textContent = "Connect";
+    btn.disabled = false;
   }
 }
 
@@ -172,8 +212,12 @@ function enableChat() {
   document.getElementById("welcome-screen").style.display = "none";
   document.getElementById("chat-container").style.display = "flex";
 
-  const fileNames = uploadedFiles.map(f => f.name).join(", ");
-  document.getElementById("topbar-title").textContent = `Analysing: ${fileNames}`;
+  if (sessionType === "csv") {
+    const fileNames = uploadedFiles.map(f => f.name).join(", ");
+    document.getElementById("topbar-title").textContent = `Analysing: ${fileNames}`;
+  } else {
+    document.getElementById("topbar-title").textContent = `Live Querying: MSSQL Database`;
+  }
 
   input.focus();
 }
@@ -225,7 +269,11 @@ async function sendQuestion() {
     const stepTimer2 = setTimeout(() => setStep("reflect", "running"), 1600);
     const stepTimer3 = setTimeout(() => setStep("synthesize", "running"), 2400);
 
-    const r = await fetch(`/api/sessions/${sessionId}/query`, {
+    const endpoint = sessionType === "mssql" 
+      ? `/api/mssql/query/${sessionId}` 
+      : `/api/sessions/${sessionId}/query`;
+
+    const r = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ question }),
@@ -354,9 +402,9 @@ function appendAssistantMessage(result) {
       <a class="btn-action" href="/api/sessions/${sessionId}/download/${result.run_id}" download>
         ⬇️ Download CSV
       </a>
-      <button class="btn-action stub" onclick="showStubToast('PDF reports coming in Phase 2!')">
-        📄 Generate PDF <span class="stub-badge">Phase 2</span>
-      </button>
+      <a class="btn-action" href="/api/sessions/${sessionId}/report.pdf" download>
+        📄 Generate PDF
+      </a>
     </div>
   ` : "";
 

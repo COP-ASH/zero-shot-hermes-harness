@@ -15,7 +15,7 @@ import re
 from src.graph.state import AnalystState
 from src.llm.client import LLMClient, load_prompt
 from src.llm.providers.base import LLMError
-from src.tools import duckdb_tool
+from src.tools import duckdb_tool, cache_tool
 from src.observability.events import get_logger
 
 _log = get_logger("nodes")
@@ -53,10 +53,13 @@ def _extract_json(text: str) -> dict:
 
 
 def plan_query(state: AnalystState) -> AnalystState:
-    """LLM writes a DuckDB SQL plan from the schema and question."""
+    """LLM writes a SQL plan from the schema and question."""
     try:
         client = LLMClient()
-        system = load_prompt("analyst_plan")
+        # Choose prompt based on session type
+        session_type = state.get("session_type", "csv")
+        prompt_name = "mssql_plan" if session_type == "mssql" else "analyst_plan"
+        system = load_prompt(prompt_name)
 
         retry_count = state.get("retry_count", 0)
         corrected_sql = state.get("corrected_sql")
@@ -91,15 +94,22 @@ def plan_query(state: AnalystState) -> AnalystState:
 
 
 def execute_query(state: AnalystState) -> AnalystState:
-    """Execute the planned SQL via DuckDB tool — no LLM call."""
+    """Execute the planned SQL via the appropriate tool — no LLM call."""
     sql = state.get("planned_sql", "")
     session_id = state.get("session_id", "")
+    session_type = state.get("session_type", "csv")
     if not sql:
         return {"error": "No SQL to execute"}
     try:
-        result = duckdb_tool.run_sql(session_id, sql)
-        csv_str = duckdb_tool.result_to_csv(result["rows"], result["columns"])
-        _log.info("execute_query", row_count=result["row_count"])
+        if session_type == "mssql":
+            result = cache_tool.run_mssql_query(sql)
+            csv_str = duckdb_tool.result_to_csv(result["rows"], result["columns"])
+            _log.info("execute_mssql_query", row_count=result["row_count"], cached=result.get("cached", False))
+        else:
+            result = duckdb_tool.run_sql(session_id, sql)
+            csv_str = duckdb_tool.result_to_csv(result["rows"], result["columns"])
+            _log.info("execute_duckdb_query", row_count=result["row_count"])
+            
         return {
             "query_result_rows": result["rows"],
             "query_result_columns": result["columns"],

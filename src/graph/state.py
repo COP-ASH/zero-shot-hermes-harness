@@ -8,6 +8,7 @@ class AnalystState(TypedDict, total=False):
     # Identity
     run_id: str
     session_id: str
+    session_type: str  # "csv" or "mssql"
 
     # Input
     question: str
