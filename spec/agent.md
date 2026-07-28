@@ -1,218 +1,137 @@
-# Agent
+# Agent Design — UP Police Data Analyst
 
-> Required when the project uses an agent framework. Delete this file if your project has no agent framework.
->
-> If your project has no agent framework (e.g., a simple script or single-LLM API call), delete this file.
->
+## Graph Framework
 
----
+LangGraph `StateGraph` with a `TypedDict` state. Compiled once at import.
 
-## Agent Architecture Pattern
+## Patterns Used
 
-<!-- FILL IN: Which pattern does this agent follow? Choose one and describe why. -->
+From `harness/patterns/agentic-ai.md`:
 
-| Pattern | Use when |
-|---------|----------|
-| **Single-agent loop** | One LLM drives a deterministic tool-call loop. No branches, no handoffs. |
-| **Graph (LangGraph)** | Multi-step pipeline with conditional edges, checkpointing, or parallel nodes. |
-| **Multi-agent** | Specialised sub-agents with distinct roles; orchestrator routes between them. |
-| **Supervisor** | One supervisor LLM dispatches to worker agents based on task type. |
-| **Human-in-the-loop** | Execution pauses at defined checkpoints for user review or approval. |
+| Pattern | Applied How |
+|---|---|
+| #5 Tool Use | `duckdb_tool` executes generated SQL; `mssql_tool` (Phase 2) reads the live DB |
+| #6 Planning | `plan_query` node: LLM produces an explicit SQL plan before executing |
+| #4 Reflection | `reflect` node: LLM validates the query result; retries with corrected SQL (max 2) |
+| #17 ReAct | Core loop: reason (plan) → act (execute) → observe (reflect) → answer |
+| #22 LLM-Generated Code Execution | LLM writes DuckDB SQL; the tool executes it; result flows back |
+| #12 Exception Handling | Every node catches errors into `state["error"]`; error edge → handle_error |
+| #8 Memory | Session state carries schema + chat history within a session |
+| #18 Guardrails | SQL validated for read-only (no INSERT/UPDATE/DELETE/DROP); output schema validated |
 
-**Chosen:** <!-- state pattern + one-sentence rationale -->
+## Graph Nodes
 
----
+```
+plan_query
+  IN:  {session_id, question, schema, chat_history, retry_count}
+  OUT: {planned_sql, step_events: ["plan"]}
+  LLM: ONE batched call with analyst_plan.md prompt
+  — Writes DuckDB SQL targeting the registered view names
+  — Never loops per line; generates the full SQL in one call
 
-## LLM Provider & Model
+execute_query
+  IN:  {planned_sql, session_id}
+  OUT: {query_result_rows, query_result_columns, step_events: ["execute"]}
+  TOOL: duckdb_tool.run_sql(session_id, sql)
+  — No LLM call; pure tool execution
+  — On tool error: sets state["error"] → error edge
 
-<!-- FILL IN: Which model drives each agent/node? State provider, model ID, and why. -->
+reflect
+  IN:  {query_result_rows, planned_sql, question, retry_count}
+  OUT: {reflection_ok: bool, corrected_sql?, step_events: ["reflect"]}
+  LLM: ONE batched call with analyst_reflect.md prompt
+  — Checks: result non-empty? column names sensible? answerable?
+  — If not OK and retry_count < 2: sets corrected_sql, increments retry_count → loop back to plan_query
+  — If not OK after 2 retries: sets state["error"] → error edge
 
-| Agent / Node | Provider | Model ID | Rationale |
-|-------------|----------|----------|-----------|
-| <!-- node --> | Anthropic | <!-- e.g. claude-sonnet-4-6 --> | <!-- latency vs. quality trade-off --> |
+synthesize
+  IN:  {query_result_rows, query_result_columns, question, chat_history, planned_sql}
+  OUT: {answer_text, chart_spec_json, follow_up_questions, step_events: ["synthesize"]}
+  LLM: ONE batched call with analyst_reflect.md → synthesize section
+  — answer_text: plain English
+  — chart_spec_json: Plotly JSON (type, x, y, title)
+  — follow_up_questions: list of 3 strings
 
-**Fallback behaviour:** <!-- Production resilience only: retry/backoff, degraded mode, or a surfaced error if the LLM API is unavailable or rate-limited. NOT a test/offline stub path — tests call the real API with keys from `.env`. -->
+handle_error
+  IN:  {error}
+  OUT: {status: "failed", answer_text: user-friendly error message}
 
-**Prompt strategy:** <!-- System/user split, few-shot examples, structured output (tool_use / JSON mode)? -->
+finalize
+  IN:  {answer_text, chart_spec_json, follow_up_questions, provider, model}
+  OUT: {status: "completed"}
+  — Writes result to session row in SQLite
+```
 
----
+## Graph Edges
 
-## Tools & Tool Calling
+```
+START → plan_query
+plan_query → execute_query
+execute_query → [error? → handle_error | ok → reflect]
+reflect → [retry? → plan_query | error? → handle_error | ok → synthesize]
+synthesize → finalize
+finalize → END
+handle_error → END
+```
 
-<!-- FILL IN: Every tool the agent can call. -->
-
-| Tool name | Description | Inputs | Output | Side-effects |
-|-----------|-------------|--------|--------|--------------|
-| <!-- name --> | <!-- what it does --> | <!-- params --> | <!-- return type --> | <!-- DB write, API call, file write, etc. --> |
-
-**Tool selection strategy:** <!-- How does the agent decide which tool to call? (LLM choice, rule-based routing, forced single tool) -->
-
-**Tool failure handling:** <!-- retry, fallback, abort — per tool or global policy? -->
-
----
-
-## Agent State
-
-<!-- FILL IN: The full state type. Every field must be named, typed, and annotated with what populates it. -->
+## State TypedDict (AnalystState)
 
 ```python
-class AgentState(TypedDict):
+class AnalystState(TypedDict, total=False):
     # Identity
-    run_id: int                          # set at initialisation
+    run_id: str
+    session_id: str
 
     # Input
-    # ...                                # fields populated from the trigger
+    question: str
+    schema: dict          # {table_name: [{col, dtype, sample}]}
+    chat_history: list    # [{role, content}]
+    retry_count: int
 
-    # Pipeline data (populated progressively by nodes)
-    # ...
+    # Intermediate
+    planned_sql: str
+    query_result_rows: list[dict]
+    query_result_columns: list[str]
+    reflection_ok: bool
+    corrected_sql: str | None
 
     # Output
-    # ...                                # final result fields
+    answer_text: str
+    chart_spec_json: str   # JSON string, Plotly spec
+    follow_up_questions: list[str]
+    step_events: list[str]
 
-    # Control
-    error: str | None                    # set by any node on fatal failure
-    checkpoint: str | None              # last completed node (for resume)
+    # Meta
+    provider: str
+    model: str
+    status: str
+    error: str | None
 ```
 
----
+## SSE Step Events
 
-## Nodes / Steps
-
-<!-- FILL IN: One section per node. For single-agent loops, describe each "step" or "tool call phase." -->
-
-### `node_[name]`
-
-**Reads from state:** <!-- field names -->
-
-**Writes to state:** <!-- field names -->
-
-**LLM call:** <!-- yes/no; if yes: prompt template summary, model used, output format -->
-
-**External calls:**
-
-| System | Operation | On Failure |
-|--------|-----------|------------|
-| <!-- system --> | <!-- what it calls --> | <!-- fatal (set error) / partial (log + continue) / retry --> |
-
-**Behaviour:** <!-- One paragraph. What decision or transformation does this node perform? -->
-
----
-
-## Graph / Flow Topology
-
-<!-- FILL IN: ASCII diagram of node flow. Show ALL conditional edges explicitly. -->
-
-```
-START
-  │
-  ▼
-node_a ──(error)──► node_handle_error ──► END
-  │
-  ▼
-node_b ──(condition)──► node_c
-  │                         │
-  │                         ▼
-  └──────────────────► node_finalize
-                             │
-                             ▼
-                            END
+Each node emits an SSE event before starting its work:
+```json
+{"step": "plan",      "status": "running", "payload": null}
+{"step": "execute",   "status": "running", "payload": {"sql": "SELECT ..."}}
+{"step": "reflect",   "status": "running", "payload": null}
+{"step": "synthesize","status": "running", "payload": null}
+{"step": "done",      "status": "completed", "payload": {
+  "answer": "...", "chart": {...}, "code": "...", "follow_ups": [...]
+}}
 ```
 
-**Conditional edges:**
+## Retry Logic
 
-| Source node | Condition | Target |
-|-------------|-----------|--------|
-| <!-- node --> | <!-- e.g. state["error"] is not None --> | <!-- target node --> |
+- `reflect` node returns `reflection_ok=False` + `corrected_sql` when result is empty or
+  clearly wrong
+- The `after_reflect` edge sends back to `plan_query` (with `corrected_sql` replacing
+  `planned_sql`) if `retry_count < 2`
+- After 2 retries, the error edge fires → `handle_error`
 
----
+## Guardrails
 
-## Memory & Context
-
-<!-- FILL IN: How does the agent remember things across turns, steps, or runs? -->
-
-| Scope | Mechanism | What is stored |
-|-------|-----------|----------------|
-| **Within a run** | LangGraph state | All in-progress data |
-| **Across runs** | <!-- DB / vector store / none --> | <!-- e.g. past results, user prefs --> |
-| **Conversation** | <!-- message history / summary / none --> | <!-- if chat-style --> |
-
-**Context window management:** <!-- How is the prompt kept within limits? (summary, sliding window, RAG retrieval) -->
-
----
-
-## Human-in-the-Loop Checkpoints
-
-<!-- FILL IN: Where does execution pause for human input? Delete section if not applicable. -->
-
-| Checkpoint | What is shown to the user | Expected user action | Timeout / default |
-|------------|--------------------------|----------------------|-------------------|
-| <!-- name --> | <!-- what the agent surfaces --> | <!-- approve / edit / abort --> | <!-- timeout action --> |
-
----
-
-## Error Handling & Recovery
-
-<!-- FILL IN: How the agent handles failures at each level. -->
-
-**Node-level:** <!-- Each node catches its own exceptions; fatal errors set state["error"] and route to handle_error node. -->
-
-**Graph-level (handle_error node):**
-- Reads: `state.error`, `state.run_id`
-- Updates DB: run status → "failed", `error_message`, `completed_at`
-- Logs error with `run_id` context
-- Terminates graph
-
-**Resume / retry strategy:** <!-- Can a failed run be resumed from its last checkpoint? How? -->
-
-**Partial failure:** <!-- If a non-critical step fails, does the agent degrade gracefully or abort? -->
-
----
-
-## Observability
-
-<!-- FILL IN: What is logged, traced, and measured? -->
-
-| Signal | What | Where |
-|--------|------|-------|
-| **Trace** | One trace per run, one span per node | <!-- OpenTelemetry / LangSmith / stdout --> |
-| **LLM calls** | Prompt tokens, completion tokens, latency, model | <!-- LangSmith / structured log --> |
-| **Tool calls** | Tool name, inputs, success/error, latency | Structured log |
-| **Run outcome** | Status, total duration, error if any | DB + structured log |
-
----
-
-## Concurrency Model
-
-<!-- FILL IN: How concurrent agent runs are handled. -->
-
-- **Run isolation:** <!-- one-at-a-time (API returns 409) / queue / parallel with run_id scoping -->
-- **Parallel nodes within a run:** <!-- which nodes run in parallel and why -->
-- **Checkpointing:** <!-- none / SqliteSaver / PostgresSaver — required if human-in-the-loop or long-running -->
-
----
-
-## Graph Assembly (`agent/graph.py`)
-
-<!-- FILL IN: Pseudocode showing how nodes and edges are wired. Must be ≤ 60 lines in the real file. -->
-
-```python
-graph = StateGraph(AgentState)
-
-graph.add_node("node_a", node_a)
-graph.add_node("node_b", node_b)
-graph.add_node("finalize", node_finalize)
-graph.add_node("handle_error", node_handle_error)
-
-graph.set_entry_point("node_a")
-
-graph.add_conditional_edges(
-    "node_a",
-    lambda s: "handle_error" if s.get("error") else "node_b",
-)
-
-graph.add_edge("node_b", "finalize")
-graph.add_edge("finalize", END)
-graph.add_edge("handle_error", END)
-
-compiled_graph = graph.compile()
-```
+- `execute_query` validates the SQL string: rejects any statement containing `INSERT`,
+  `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `EXEC` (case-insensitive) before passing
+  to DuckDB — returns error state immediately
+- `synthesize` output validated: `chart_spec_json` must parse as valid JSON with `type` key
